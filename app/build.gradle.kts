@@ -10,11 +10,15 @@ android {
         applicationId = "com.m3browser"
         minSdk = 26
         targetSdk = 37
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = 4
+        versionName = "1.0.3"
         val oauthId = (project.findProperty("GITHUB_OAUTH_CLIENT_ID") as? String).orEmpty()
             .replace("\\", "").replace("\"", "")
         buildConfigField("String", "GITHUB_OAUTH_CLIENT_ID", "\"$oauthId\"")
+        // Phones are arm64. Shipping every ABI (especially ML Kit's native libs) made 1.0.2 ~80MB.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
     signingConfigs {
         // The keystore is committed on purpose. It is not a production secret:
@@ -30,6 +34,12 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
     buildFeatures {

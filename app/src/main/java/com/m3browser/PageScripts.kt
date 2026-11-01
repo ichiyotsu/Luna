@@ -95,13 +95,9 @@ object PageScripts {
             };
             if (!window.__m3Obs && document.documentElement) {
               window.__m3Obs = new MutationObserver(function() {
-                if (window.__m3Pend) return;
+                if (!window.__m3TrOn || window.__m3Pend) return;
                 window.__m3Pend = true;
-                setTimeout(function() {
-                  window.__m3Pend = false;
-                  if (window.__m3SetInset) window.__m3SetInset(window.__m3Top || 0, window.__m3Bottom || 0, false);
-                  if (window.__m3TrOn) window.__m3Scan();
-                }, 280);
+                setTimeout(function() { window.__m3Pend = false; window.__m3Scan && window.__m3Scan(); }, 280);
               });
               var root = document.body || document.documentElement;
               window.__m3Obs.observe(root, {childList: true, subtree: true, characterData: true});
@@ -115,9 +111,6 @@ object PageScripts {
           } catch (e) {}
         })();
     """.trimIndent()
-
-    fun inset(topPx: Int, bottomPx: Int, stick: Boolean): String =
-        "window.__m3SetInset && window.__m3SetInset($topPx,$bottomPx,${if (stick) "true" else "false"});"
 
     fun startTranslate(): String = "window.__m3TrStart && window.__m3TrStart();"
     fun stopTranslate(): String = "window.__m3TrStop && window.__m3TrStop();"

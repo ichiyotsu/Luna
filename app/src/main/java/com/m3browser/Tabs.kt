@@ -66,8 +66,7 @@ class BrowserController(
     var desktopDefault: Boolean = false
     var translateHost: TranslateHost? = null
     private var runtime = AppSettings()
-    private var insetTop = 0
-    private var insetBottom = 0
+    private var stockUserAgent: String? = null
 
     fun newTab(url: String? = null, incognito: Boolean = false) {
         val t = BrowserTab(nextId++, incognito)
@@ -143,14 +142,6 @@ class BrowserController(
 
     fun findNext(tab: BrowserTab, forward: Boolean) { tab.webView?.findNext(forward) }
     fun clearFind(tab: BrowserTab) { tab.webView?.clearMatches(); tab.findActive = 0; tab.findCount = 0 }
-
-    fun updateInset(topPx: Int, bottomPx: Int, stickToBottom: Boolean) {
-        insetTop = topPx
-        insetBottom = bottomPx
-        tabs.forEach { tab ->
-            tab.webView?.let { injectInset(it, topPx, bottomPx, stickToBottom && tab.id == current?.id) }
-        }
-    }
 
     fun apply(settings: AppSettings) {
         runtime = settings
@@ -228,7 +219,9 @@ class BrowserController(
     }
 
     @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
-    private fun createWebView(tab: BrowserTab): WebView = M3WebView(context, tab).apply {
+    private fun createWebView(tab: BrowserTab): WebView = M3WebView(context, tab) { attached ->
+        applyWebSettings(attached, tab, runtime, reloadIfScriptChanged = false)
+    }.apply {
         if (tab.incognito && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
             runCatching {
                 ProfileStore.getInstance().getOrCreateProfile(INCOGNITO_PROFILE)
@@ -237,6 +230,7 @@ class BrowserController(
             }
         }
         if (tab.incognito) settings.cacheMode = WebSettings.LOAD_NO_CACHE
+        setBackgroundColor(android.graphics.Color.WHITE)
         applyWebSettings(this, tab, runtime, reloadIfScriptChanged = false)
         settings.domStorageEnabled = true
         settings.loadWithOverviewMode = true
@@ -264,6 +258,8 @@ class BrowserController(
                 return false
             }
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                // Re-apply after navigation. Some WebView builds drop JavaScript when the user agent changes.
+                applyWebSettings(view, tab, runtime, reloadIfScriptChanged = false)
                 tab.loading = true
                 tab.progress = 0.05f
                 tab.translated = false
@@ -273,13 +269,13 @@ class BrowserController(
                 injectHelpers(view, tab.id)
             }
             override fun onPageFinished(view: WebView, url: String?) {
+                applyWebSettings(view, tab, runtime, reloadIfScriptChanged = false)
                 tab.loading = false
                 tab.progress = 1f
                 url?.let { tab.url = it }
                 view.title?.takeIf { it.isNotBlank() }?.let { tab.title = it }
                 updateNav(view)
                 injectHelpers(view, tab.id)
-                injectInset(view, insetTop, insetBottom, false)
                 if (!tab.incognito && url != null && url.startsWith("http")) onVisited(PageEntry(tab.title, url))
             }
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
@@ -309,13 +305,31 @@ class BrowserController(
 
     private fun applyWebSettings(wv: WebView, tab: BrowserTab, settings: AppSettings, reloadIfScriptChanged: Boolean) {
         val wasJs = wv.settings.javaScriptEnabled
-        wv.settings.javaScriptEnabled = settings.javascript
+        val js = settings.javascript
+        if (stockUserAgent == null) {
+            val current = wv.settings.userAgentString
+            if (!current.isNullOrBlank() && !current.contains("Windows NT 10.0; Win64")) stockUserAgent = current
+        }
+        // Change the user agent before JavaScript. Restoring a null user agent has been observed
+        // to clear javaScriptEnabled on some WebView builds, so JavaScript is always set last.
+        wv.settings.userAgentString = if (tab.desktop) DESKTOP_UA else stockUserAgent
         wv.settings.textZoom = settings.textZoom.coerceIn(50, 200)
-        applyUserAgent(wv, tab.desktop)
+        wv.settings.domStorageEnabled = true
+        wv.settings.loadsImagesAutomatically = true
+        wv.settings.javaScriptCanOpenWindowsAutomatically = true
+        wv.settings.useWideViewPort = true
+        wv.settings.loadWithOverviewMode = true
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            wv.settings.isAlgorithmicDarkeningAllowed = false
+        } else if (android.os.Build.VERSION.SDK_INT >= 29) {
+            @Suppress("DEPRECATION")
+            wv.settings.forceDark = WebSettings.FORCE_DARK_OFF
+        }
+        wv.settings.javaScriptEnabled = js
         val cookies = cookieManager(tab)
         cookies?.setAcceptCookie(true)
-        cookies?.setAcceptThirdPartyCookies(wv, !settings.blockThirdPartyCookies)
-        if (reloadIfScriptChanged && wasJs != settings.javascript && !tab.isHome) wv.reload()
+        runCatching { cookies?.setAcceptThirdPartyCookies(wv, !settings.blockThirdPartyCookies) }
+        if (reloadIfScriptChanged && wasJs != js && !tab.isHome) wv.reload()
     }
 
     private fun cookieManager(tab: BrowserTab): CookieManager? = if (tab.incognito && tab.isolatedProfile) {
@@ -323,15 +337,17 @@ class BrowserController(
     } else CookieManager.getInstance()
 
     private fun applyUserAgent(wv: WebView, desktop: Boolean) {
-        wv.settings.userAgentString = if (desktop) DESKTOP_UA else null
+        if (stockUserAgent == null) {
+            val current = wv.settings.userAgentString
+            if (!current.isNullOrBlank() && !current.contains("Windows NT 10.0; Win64")) stockUserAgent = current
+        }
+        wv.settings.userAgentString = if (desktop) DESKTOP_UA else stockUserAgent
+        wv.settings.javaScriptEnabled = runtime.javascript
+        wv.settings.domStorageEnabled = true
     }
 
     private fun injectHelpers(wv: WebView, tabId: Long) {
         wv.evaluateJavascript(PageScripts.bootstrap(tabId), null)
-    }
-
-    private fun injectInset(wv: WebView, top: Int, bottom: Int, stick: Boolean) {
-        wv.evaluateJavascript(PageScripts.inset(top, bottom, stick), null)
     }
 
     fun runPageJs(tab: BrowserTab, js: String) {
@@ -376,7 +392,7 @@ class BrowserController(
                 CookieManager.getInstance().getCookie(url)?.let { addRequestHeader("Cookie", it) }
                 ua?.let { addRequestHeader("User-Agent", it) }
                 setTitle(name)
-                setDescription("M3 Browser 下载")
+                setDescription("Luna 下载")
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
             }
@@ -389,8 +405,16 @@ class BrowserController(
 
     private fun toast(s: String) = Toast.makeText(context, s, Toast.LENGTH_SHORT).show()
 
-    private class M3WebView(context: Context, val tab: BrowserTab) : WebView(context) {
+    private class M3WebView(
+        context: Context,
+        val tab: BrowserTab,
+        private val onAttach: (WebView) -> Unit,
+    ) : WebView(context) {
         private var seq = 0
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            onAttach(this)
+        }
         override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
             super.onScrollChanged(l, t, oldl, oldt)
             val dy = t - oldt

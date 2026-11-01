@@ -38,7 +38,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -113,7 +112,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -144,9 +142,7 @@ import com.m3browser.TokenStore
 import com.m3browser.ToolbarAction
 import com.m3browser.UpdateChecker
 import com.m3browser.UrlUtils
-import com.m3browser.chromeInsets
 import com.m3browser.languageLabel
-import com.m3browser.pillOverlapPx
 import com.m3browser.shouldExpandBar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -338,7 +334,7 @@ fun BrowserApp(controller: BrowserController, store: Store) {
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = {
                     offer = null
-                    downloadName = rel.assetName.ifBlank { "M3Browser-${rel.tag}.apk" }
+                    downloadName = rel.assetName.ifBlank { "Luna-${rel.tag}.apk" }
                     downloadPct = 0
                     downloadId = checker.enqueue(rel.copy(assetName = downloadName))
                 }, modifier = Modifier.fillMaxWidth()) { Text("立即更新") }
@@ -376,7 +372,7 @@ fun BrowserApp(controller: BrowserController, store: Store) {
         AlertDialog(
             onDismissRequest = { askInstall = null },
             title = { Text("需要允许安装未知应用") },
-            text = { Text("下载已完成。请在系统设置中允许 M3 Browser 安装应用，然后返回继续。") },
+            text = { Text("下载已完成。请在系统设置中允许 Luna 安装应用，然后返回继续。") },
             confirmButton = {
                 TextButton(onClick = {
                     if (checker.canRequestInstalls()) {
@@ -416,23 +412,16 @@ private fun BrowserScreen(
     var findMode by remember { mutableStateOf(false) }
     var findQuery by remember { mutableStateOf("") }
     var expanded by remember(tab.id) { mutableStateOf(true) }
-    var barPx by remember { mutableIntStateOf(with(density) { 148.dp.roundToPx() }) }
-    var pillPx by remember { mutableIntStateOf(with(density) { 44.dp.roundToPx() }) }
-    val statusPx = WindowInsets.statusBars.union(WindowInsets.displayCutout).getTop(density)
+    val statusDp = with(density) {
+        WindowInsets.statusBars.union(WindowInsets.displayCutout).getTop(density).toDp()
+    }
     val navPx = WindowInsets.navigationBars.getBottom(density)
     val imePx = WindowInsets.ime.getBottom(density)
+    val bottomInset = with(density) { maxOf(navPx, imePx).toDp() }
     val force = focused || menu || findMode || tab.isHome || translate.prompt?.tabId == tab.id || translate.busy
     LaunchedEffect(tab.scroll.seq, force, tab.id, tab.isHome) {
         expanded = if (tab.isHome) true else shouldExpandBar(expanded, tab.scroll.dy, tab.scroll.atTop, tab.scroll.atBottom, force)
     }
-    val overlap = pillOverlapPx(pillPx, if (settings.barAtTop) statusPx else navPx)
-    val insets = chromeInsets(settings.barAtTop, expanded, if (expanded) barPx else 0, statusPx, navPx, imePx, if (expanded) 0 else overlap)
-    LaunchedEffect(insets.jsTop, insets.jsBottom, tab.id, tab.url, expanded, tab.scroll.atBottom) {
-        controller.updateInset(insets.jsTop, insets.jsBottom, expanded && tab.scroll.atBottom && !tab.isHome)
-    }
-    val outerBottom = with(density) { maxOf(navPx, imePx).toDp() }
-    val outerTop = with(density) { statusPx.toDp() }
-    val shift: Dp = if (!expanded) with(density) { (pillPx - overlap).coerceAtLeast(0).toDp() } else 0.dp
 
     fun dispatch(action: ToolbarAction) {
         when (action) {
@@ -455,83 +444,74 @@ private fun BrowserScreen(
         }
     }
 
+    val bar: @Composable () -> Unit = {
+        UnifiedBar(
+            tab, settings, controller.tabs.size, expanded, isBookmarked, menu, findMode, findQuery, translate.busy,
+            onExpand = { expanded = true },
+            onMenu = { menu = it },
+            onSubmit = onSubmit,
+            onFocused = { focused = it },
+            onReloadStop = { if (tab.loading) controller.stop(tab) else controller.reload(tab) },
+            onAction = { dispatch(it) },
+            onFindQuery = { findQuery = it; controller.find(tab, it) },
+            onFindNext = { controller.findNext(tab, true) },
+            onCloseFind = { findMode = false; findQuery = ""; controller.clearFind(tab) },
+            onDispatchMenu = { id -> menu = false; dispatch(id) },
+            incognitoNew = { menu = false; controller.newTab(incognito = true) },
+            bookmarkToggle = { menu = false; onToggleBookmark() },
+            share = { menu = false; sharePage(context, tab) },
+            translateToggle = {
+                menu = false
+                if (tab.translated) translate.showOriginal(tab) else translate.translate(tab)
+            },
+        )
+    }
+    // The bar is a sibling of the page, so the WebView's layout box never runs under it.
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        Box(Modifier.fillMaxSize().padding(bottom = with(density) { insets.viewPadBottom.toDp() })) {
-            if (tab.isHome) {
-                HomePage(settings.engine, settings.shortcuts, onSubmit, Modifier.padding(
-                    top = with(density) { insets.jsTop.toDp() },
-                    bottom = with(density) { insets.jsBottom.toDp() },
-                ))
-            } else key(tab.id, tab.webView) {
-                AndroidView(
-                    factory = { FrameLayout(it) },
-                    update = { frame ->
-                        val wv = tab.webView
-                        if (wv != null && wv.parent !== frame) {
-                            (wv.parent as? ViewGroup)?.removeView(wv)
-                            frame.removeAllViews()
-                            frame.addView(wv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-        Scrim(top = true, height = outerTop + 32.dp)
-        Scrim(top = false, height = outerBottom + 40.dp)
-        translate.prompt?.takeIf { it.tabId == tab.id }?.let { prompt ->
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                modifier = Modifier
-                    .align(if (settings.barAtTop) Alignment.TopCenter else Alignment.BottomCenter)
-                    .padding(
-                        top = if (settings.barAtTop) outerTop + 8.dp else 0.dp,
-                        bottom = if (settings.barAtTop) 0.dp else outerBottom + 72.dp,
-                        start = 16.dp, end = 16.dp,
+        Column(Modifier.fillMaxSize().padding(top = statusDp, bottom = bottomInset)) {
+            if (settings.barAtTop) bar()
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (tab.isHome) {
+                    HomePage(settings.engine, settings.shortcuts, onSubmit, Modifier.fillMaxSize())
+                } else key(tab.id, tab.webView) {
+                    AndroidView(
+                        factory = { FrameLayout(it) },
+                        update = { frame ->
+                            val wv = tab.webView
+                            if (wv != null && wv.parent !== frame) {
+                                (wv.parent as? ViewGroup)?.removeView(wv)
+                                frame.removeAllViews()
+                                frame.addView(wv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
                     )
-                    .fillMaxWidth(),
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text("此页面语言与${languageLabel(settings.translateLang)}不同，要翻译吗？", style = MaterialTheme.typography.bodyMedium)
-                    Row {
-                        TextButton(onClick = { translate.acceptPrompt() }) { Text("翻译") }
-                        TextButton(onClick = { translate.dismiss() }) { Text("稍后") }
-                        TextButton(onClick = { translate.neverSite() }) { Text("此站不再提示") }
+                }
+                translate.prompt?.takeIf { it.tabId == tab.id }?.let {
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier
+                            .align(if (settings.barAtTop) Alignment.TopCenter else Alignment.BottomCenter)
+                            .padding(12.dp)
+                            .fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("此页面语言与${languageLabel(settings.translateLang)}不同，要翻译吗？", style = MaterialTheme.typography.bodyMedium)
+                            Row {
+                                TextButton(onClick = { translate.acceptPrompt() }) { Text("翻译") }
+                                TextButton(onClick = { translate.dismiss() }) { Text("稍后") }
+                                TextButton(onClick = { translate.neverSite() }) { Text("此站不再提示") }
+                            }
+                        }
                     }
                 }
             }
+            if (!settings.barAtTop) bar()
         }
-        Box(
-            Modifier
-                .align(if (settings.barAtTop) Alignment.TopCenter else Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(top = if (settings.barAtTop) outerTop else 0.dp, bottom = if (settings.barAtTop) 0.dp else outerBottom)
-                .offset(y = if (!expanded && settings.barAtTop) -shift else if (!expanded) shift else 0.dp)
-                .onSizeChanged { if (expanded) barPx = it.height else pillPx = it.height },
-            contentAlignment = Alignment.Center,
-        ) {
-            UnifiedBar(
-                tab, settings, controller.tabs.size, expanded, isBookmarked, menu, findMode, findQuery, translate.busy,
-                onExpand = { expanded = true },
-                onMenu = { menu = it },
-                onSubmit = onSubmit,
-                onFocused = { focused = it },
-                onReloadStop = { if (tab.loading) controller.stop(tab) else controller.reload(tab) },
-                onAction = { dispatch(it) },
-                onFindQuery = { findQuery = it; controller.find(tab, it) },
-                onFindNext = { controller.findNext(tab, true) },
-                onCloseFind = { findMode = false; findQuery = ""; controller.clearFind(tab) },
-                onDispatchMenu = { id -> menu = false; dispatch(id) },
-                incognitoNew = { menu = false; controller.newTab(incognito = true) },
-                bookmarkToggle = { menu = false; onToggleBookmark() },
-                share = { menu = false; sharePage(context, tab) },
-                translateToggle = {
-                    menu = false
-                    if (tab.translated) translate.showOriginal(tab) else translate.translate(tab)
-                },
-            )
-        }
+        // Gradients stay inside the system-bar bands, outside the WebView.
+        Scrim(top = true, height = statusDp)
+        Scrim(top = false, height = bottomInset)
     }
 }
 
@@ -570,6 +550,7 @@ private fun UnifiedBar(
     Frosted(
         enabled = settings.blur && !tab.isHome,
         webView = tab.webView,
+        sampleTopEdge = settings.barAtTop,
         tint = tint,
         shape = shape,
         modifier = Modifier
@@ -592,35 +573,23 @@ private fun UnifiedBar(
                     if (tab.loading) LoadingIndicator(Modifier.padding(start = 8.dp).size(18.dp))
                 }
             } else {
-                Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-                    if (!settings.barAtTop && tab.loading && !tab.isHome) {
-                        val p by animateFloatAsState(tab.progress, spring(stiffness = Spring.StiffnessLow), label = "p")
-                        LinearWavyProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp))
-                    }
-                    if (tab.incognito) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp, bottom = 2.dp)) {
-                            Icon(Icons.Rounded.VisibilityOff, null, Modifier.size(14.dp), tint = contentColor)
-                            Text(" 无痕", style = MaterialTheme.typography.labelMedium, color = contentColor)
-                        }
-                    }
-                    if (findMode) {
-                        FindRow(findQuery, tab.findActive, tab.findCount, onFindQuery, onFindNext, onCloseFind, contentColor)
-                    } else {
-                        AddressField(tab, contentColor, onSubmit, onFocused, onReloadStop)
-                    }
-                    Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                    ) {
+                Box(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+                    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
                         settings.toolbar.forEach { action ->
                             val active = (action == ToolbarAction.DESKTOP && tab.desktop) ||
                                 (action == ToolbarAction.TRANSLATE && tab.translated) ||
                                 (action == ToolbarAction.ADD_BOOKMARK && isBookmarked)
                             ActionIcon(action, tab, tabCount, active, translating) { onAction(action) }
                         }
+                        if (findMode) {
+                            FindRow(findQuery, tab.findActive, tab.findCount, onFindQuery, onFindNext, onCloseFind, contentColor, Modifier.weight(1f))
+                        } else {
+                            AddressField(tab, contentColor, onSubmit, onFocused, onReloadStop, Modifier.weight(1f))
+                        }
                         Box {
-                            IconButton(onClick = { onMenu(true) }) { Icon(Icons.Rounded.MoreVert, "菜单", tint = contentColor) }
+                            IconButton(onClick = { onMenu(true) }, modifier = Modifier.size(40.dp)) {
+                                Icon(Icons.Rounded.MoreVert, "菜单", tint = contentColor)
+                            }
                             DropdownMenu(expanded = menu, onDismissRequest = { onMenu(false) }, shape = RoundedCornerShape(20.dp)) {
                                 MenuRow("新标签页", Icons.Rounded.Add) { onDispatchMenu(ToolbarAction.NEW_TAB) }
                                 MenuRow("无痕标签页", Icons.Rounded.VisibilityOff) { incognitoNew() }
@@ -635,9 +604,12 @@ private fun UnifiedBar(
                             }
                         }
                     }
-                    if (settings.barAtTop && tab.loading && !tab.isHome) {
-                        val p by animateFloatAsState(tab.progress, spring(stiffness = Spring.StiffnessLow), label = "p2")
-                        LinearWavyProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                    if (tab.loading && !tab.isHome) {
+                        val p by animateFloatAsState(tab.progress, spring(stiffness = Spring.StiffnessLow), label = "p")
+                        LinearWavyProgressIndicator(
+                            progress = { p },
+                            modifier = Modifier.align(if (settings.barAtTop) Alignment.BottomCenter else Alignment.TopCenter).fillMaxWidth().height(3.dp),
+                        )
                     }
                 }
             }
@@ -671,7 +643,7 @@ private fun ActionIcon(action: ToolbarAction, tab: BrowserTab, tabCount: Int, ac
         ToolbarAction.ADD_BOOKMARK, ToolbarAction.SHARE, ToolbarAction.TRANSLATE, ToolbarAction.FIND, ToolbarAction.DESKTOP, ToolbarAction.RELOAD -> !tab.isHome || action == ToolbarAction.RELOAD
         else -> true
     }
-    IconButton(onClick = onClick, enabled = enabled) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(40.dp)) {
         if (action == ToolbarAction.TABS) {
             Box(Modifier.size(24.dp).background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
                 Text(tabCountLabel(tabCount), color = MaterialTheme.colorScheme.onSecondaryContainer, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
@@ -706,6 +678,7 @@ private fun AddressField(
     onSubmit: (String) -> Unit,
     onFocused: (Boolean) -> Unit,
     onReloadStop: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
     var value by remember(tab.id) { mutableStateOf(TextFieldValue("")) }
@@ -713,8 +686,9 @@ private fun AddressField(
     LaunchedEffect(focused, tab.url) {
         if (!focused) value = TextFieldValue(if (tab.isHome) "" else UrlUtils.displayHost(tab.url))
     }
-    Surface(shape = CircleShape, color = if (tab.incognito) Color.White.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.55f), modifier = Modifier.fillMaxWidth().height(48.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 10.dp, end = 2.dp)) {
+    Surface(shape = CircleShape, color = if (tab.incognito) Color.White.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.55f), modifier = modifier.height(40.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp, end = 2.dp)) {
+            if (tab.incognito && !focused) Icon(Icons.Rounded.VisibilityOff, "无痕", Modifier.padding(end = 4.dp).size(16.dp), tint = contentColor)
             LeadingMark(tab, focused)
             Spacer(Modifier.width(8.dp))
             Box(Modifier.weight(1f)) {
@@ -771,8 +745,9 @@ private fun FindRow(
     onNext: () -> Unit,
     onClose: () -> Unit,
     color: Color,
+    modifier: Modifier = Modifier,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier.height(40.dp)) {
         BasicTextField(
             value = query,
             onValueChange = onQuery,
@@ -797,8 +772,8 @@ private fun BoxScope.Scrim(top: Boolean, height: Dp) {
             .height(height)
             .background(
                 Brush.verticalGradient(
-                    if (top) listOf(base.copy(alpha = 0.72f), base.copy(alpha = 0.28f), Color.Transparent)
-                    else listOf(Color.Transparent, base.copy(alpha = 0.28f), base.copy(alpha = 0.72f)),
+                    if (top) listOf(base.copy(alpha = 0.35f), Color.Transparent)
+                    else listOf(Color.Transparent, base.copy(alpha = 0.35f)),
                 ),
             ),
     )

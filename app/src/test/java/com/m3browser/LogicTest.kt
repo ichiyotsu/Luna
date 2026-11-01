@@ -83,6 +83,14 @@ class LogicTest {
         assertTrue(SyncMerge.mergeSettings(remote, local.copy(updatedAt = 20, blur = true)).blur)
     }
 
+    @Test fun releaseApkName() {
+        assertEquals(
+            "Luna-v1.0.3.apk",
+            pickReleaseApk(listOf("M3Browser-v1.0.2.apk", "Luna-v1.0.3.apk")),
+        )
+        assertEquals("M3Browser-v1.0.2.apk", pickReleaseApk(listOf("notes.txt", "M3Browser-v1.0.2.apk")))
+    }
+
     @Test fun toolbarCap() {
         val many = ToolbarAction.CATALOG
         assertEquals(ToolbarAction.MAX_SLOTS, sanitizeToolbar(many).size)
