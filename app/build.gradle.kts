@@ -10,18 +10,32 @@ android {
         applicationId = "com.m3browser"
         minSdk = 26
         targetSdk = 37
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.0.2"
+        val oauthId = (project.findProperty("GITHUB_OAUTH_CLIENT_ID") as? String).orEmpty()
+            .replace("\\", "").replace("\"", "")
+        buildConfigField("String", "GITHUB_OAUTH_CLIENT_ID", "\"$oauthId\"")
     }
-    buildTypes {
-        // Sign release with the debug keystore (created by the Android SDK /
-        // the CI job) so the APK from GitHub Releases installs without a
-        // private release key or any repository secret.
-        release {
-            signingConfig = signingConfigs.getByName("debug")
+    signingConfigs {
+        // The keystore is committed on purpose. It is not a production secret:
+        // it only exists so every GitHub Release is signed with the same key
+        // and in-app updates can install over the previous build.
+        create("release") {
+            storeFile = rootProject.file("keystore/m3browser-release.keystore")
+            storePassword = "m3browser"
+            keyAlias = "m3browser"
+            keyPassword = "m3browser"
         }
     }
-    buildFeatures { compose = true }
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -34,5 +48,9 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("androidx.datastore:datastore-preferences:1.1.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
+    implementation("androidx.webkit:webkit:1.14.0")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("com.google.mlkit:translate:17.0.3")
+    implementation("com.google.mlkit:language-id:17.0.6")
     testImplementation("junit:junit:4.13.2")
 }

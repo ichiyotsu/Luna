@@ -14,10 +14,11 @@ captures/
 .externalNativeBuild/
 .cxx/
 
-# Signing keys. The release workflow signs with a debug keystore
-# generated on the runner; do not commit any keystore.
+# Signing keys. The shared hobby-app release keystore is the one exception:
+# every release must use it so in-app updates can install over the last build.
 *.keystore
 *.jks
+!keystore/m3browser-release.keystore
 
 # Packaged outputs
 *.apk

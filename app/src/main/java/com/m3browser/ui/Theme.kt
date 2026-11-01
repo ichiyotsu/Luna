@@ -1,5 +1,6 @@
 package com.m3browser.ui
 
+import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,49 +13,119 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import com.m3browser.AppSettings
 import com.m3browser.ThemeMode
 
-// Fallback scheme generated around seed #6A3DE8 (vivid violet)
-private val Light = lightColorScheme(
-    primary = Color(0xFF6A3DE8), onPrimary = Color.White,
-    primaryContainer = Color(0xFFE8DDFF), onPrimaryContainer = Color(0xFF22005D),
-    secondary = Color(0xFF625B71), onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE8DEF8), onSecondaryContainer = Color(0xFF1E192B),
-    tertiary = Color(0xFFB4246B), onTertiary = Color.White,
-    tertiaryContainer = Color(0xFFFFD9E4), onTertiaryContainer = Color(0xFF3E0021),
-    background = Color(0xFFFDF7FF), onBackground = Color(0xFF1D1B20),
-    surface = Color(0xFFFDF7FF), onSurface = Color(0xFF1D1B20),
-    surfaceVariant = Color(0xFFE7E0EB), onSurfaceVariant = Color(0xFF49454E),
-    surfaceContainerLowest = Color.White, surfaceContainerLow = Color(0xFFF8F1FA),
-    surfaceContainer = Color(0xFFF2ECF4), surfaceContainerHigh = Color(0xFFECE6EE),
-    surfaceContainerHighest = Color(0xFFE6E0E9), outline = Color(0xFF7A757F),
+private fun Color.mix(other: Color, amount: Float): Color = Color(
+    red = red + (other.red - red) * amount,
+    green = green + (other.green - green) * amount,
+    blue = blue + (other.blue - blue) * amount,
 )
-private val Dark = darkColorScheme(
-    primary = Color(0xFFCFBCFF), onPrimary = Color(0xFF381E72),
-    primaryContainer = Color(0xFF5023CF), onPrimaryContainer = Color(0xFFE8DDFF),
-    secondary = Color(0xFFCCC2DC), onSecondary = Color(0xFF332D41),
-    secondaryContainer = Color(0xFF4A4458), onSecondaryContainer = Color(0xFFE8DEF8),
-    tertiary = Color(0xFFFFB0CB), onTertiary = Color(0xFF5E1138),
-    tertiaryContainer = Color(0xFF8F0A52), onTertiaryContainer = Color(0xFFFFD9E4),
-    background = Color(0xFF141218), onBackground = Color(0xFFE6E0E9),
-    surface = Color(0xFF141218), onSurface = Color(0xFFE6E0E9),
-    surfaceVariant = Color(0xFF49454F), onSurfaceVariant = Color(0xFFCAC4D0),
-    surfaceContainerLowest = Color(0xFF0F0D13), surfaceContainerLow = Color(0xFF1D1B20),
-    surfaceContainer = Color(0xFF211F26), surfaceContainerHigh = Color(0xFF2B2930),
-    surfaceContainerHighest = Color(0xFF36343B), outline = Color(0xFF948F99),
+
+private fun schemeFromSeed(seed: Color, dark: Boolean) = if (!dark) {
+    lightColorScheme(
+        primary = seed,
+        onPrimary = Color.White,
+        primaryContainer = seed.mix(Color.White, 0.78f),
+        onPrimaryContainer = seed.mix(Color.Black, 0.62f),
+        secondary = seed.mix(Color(0xFF5E5E5E), 0.45f),
+        onSecondary = Color.White,
+        secondaryContainer = seed.mix(Color.White, 0.88f),
+        onSecondaryContainer = seed.mix(Color.Black, 0.72f),
+        tertiary = Color(
+            red = (seed.blue * 0.55f + 0.25f).coerceIn(0f, 1f),
+            green = (seed.green * 0.45f).coerceIn(0f, 1f),
+            blue = (seed.red * 0.65f + 0.1f).coerceIn(0f, 1f),
+        ),
+        onTertiary = Color.White,
+        tertiaryContainer = seed.mix(Color(0xFFFFE4EE), 0.55f),
+        onTertiaryContainer = seed.mix(Color.Black, 0.7f),
+        background = Color(0xFFFFFBFF),
+        onBackground = Color(0xFF1C1B1F),
+        surface = Color(0xFFFFFBFF),
+        onSurface = Color(0xFF1C1B1F),
+        surfaceVariant = seed.mix(Color(0xFFE7E0EC), 0.7f),
+        onSurfaceVariant = Color(0xFF49454F),
+        surfaceContainerLowest = Color.White,
+        surfaceContainerLow = seed.mix(Color.White, 0.94f),
+        surfaceContainer = seed.mix(Color.White, 0.90f),
+        surfaceContainerHigh = seed.mix(Color.White, 0.86f),
+        surfaceContainerHighest = seed.mix(Color.White, 0.82f),
+        outline = seed.mix(Color(0xFF79747E), 0.4f),
+    )
+} else {
+    val primary = seed.mix(Color.White, 0.42f)
+    darkColorScheme(
+        primary = primary,
+        onPrimary = seed.mix(Color.Black, 0.55f),
+        primaryContainer = seed.mix(Color.Black, 0.45f),
+        onPrimaryContainer = seed.mix(Color.White, 0.78f),
+        secondary = primary.mix(Color(0xFFCCC4D6), 0.55f),
+        onSecondary = Color(0xFF332D41),
+        secondaryContainer = seed.mix(Color.Black, 0.62f),
+        onSecondaryContainer = Color(0xFFE8DEF8),
+        tertiary = primary.mix(Color(0xFFFFB0CB), 0.4f),
+        onTertiary = Color(0xFF5E1138),
+        tertiaryContainer = seed.mix(Color.Black, 0.5f),
+        onTertiaryContainer = Color(0xFFFFD8E4),
+        background = Color(0xFF141218),
+        onBackground = Color(0xFFE6E1E5),
+        surface = Color(0xFF141218),
+        onSurface = Color(0xFFE6E1E5),
+        surfaceVariant = Color(0xFF49454F),
+        onSurfaceVariant = Color(0xFFCAC4D0),
+        surfaceContainerLowest = Color(0xFF0F0D13),
+        surfaceContainerLow = Color(0xFF1D1B20),
+        surfaceContainer = Color(0xFF211F26),
+        surfaceContainerHigh = Color(0xFF2B2930),
+        surfaceContainerHighest = Color(0xFF36343B),
+        outline = Color(0xFF948F99),
+    )
+}
+
+private fun androidx.compose.material3.ColorScheme.amoled(): androidx.compose.material3.ColorScheme = copy(
+    background = Color.Black,
+    surface = Color.Black,
+    surfaceContainerLowest = Color.Black,
+    surfaceContainerLow = Color(0xFF0A0A0A),
+    surfaceContainer = Color(0xFF121212),
+    surfaceContainerHigh = Color(0xFF1C1C1C),
+    surfaceContainerHighest = Color(0xFF262626),
 )
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun M3BrowserTheme(mode: ThemeMode, content: @Composable () -> Unit) {
-    val dark = when (mode) { ThemeMode.SYSTEM -> isSystemInDarkTheme(); ThemeMode.LIGHT -> false; ThemeMode.DARK -> true }
+fun M3BrowserTheme(settings: AppSettings, content: @Composable () -> Unit) {
+    val dark = when (settings.theme) {
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }
     val ctx = LocalContext.current
-    val scheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    val monetAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && settings.monet
+    var scheme = if (monetAvailable) {
         if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-    } else if (dark) Dark else Light
+    } else {
+        schemeFromSeed(Color(settings.seed.toInt()), dark)
+    }
+    if (dark && settings.amoled) scheme = scheme.amoled()
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        val lightIcons = scheme.surface.luminance() > 0.5f
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = lightIcons
+            controller.isAppearanceLightNavigationBars = lightIcons
+        }
+    }
     MaterialExpressiveTheme(
         colorScheme = scheme,
         motionScheme = MotionScheme.expressive(),
