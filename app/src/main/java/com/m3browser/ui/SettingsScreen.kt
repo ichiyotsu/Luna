@@ -277,7 +277,7 @@ fun SettingsScreen(
                 }
             }
             Section("关于") {
-                Text("M3 Browser ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleMedium)
+                Text("Luna ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleMedium)
                 Text("versionCode ${BuildConfig.VERSION_CODE} · Material 3 Expressive", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 SwitchRow("自动检查更新", "每次打开应用时查询 GitHub Releases", settings.autoUpdateCheck) { edit { s -> s.copy(autoUpdateCheck = it) } }
                 TextButton(onClick = onCheckUpdate) { Text("检查更新") }

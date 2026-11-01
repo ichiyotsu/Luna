@@ -74,7 +74,7 @@ jobs:
           fi
           echo "name=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
-          echo "asset=M3Browser-v$version.apk" >> "$GITHUB_OUTPUT"
+          echo "asset=Luna-v$version.apk" >> "$GITHUB_OUTPUT"
 
       - name: Build signed release APK
         run: ./gradlew assembleRelease --stacktrace
@@ -95,15 +95,15 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: M3 Browser ${{ steps.version.outputs.tag }}
+          name: Luna ${{ steps.version.outputs.tag }}
           make_latest: "true"
           overwrite_files: true
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            M3 Browser ${{ steps.version.outputs.name }} 安装包。
+            Luna ${{ steps.version.outputs.name }} 安装包。
 
             下载附件 `${{ steps.version.outputs.asset }}`，在手机上允许安装未知来源应用后安装。
-            此 APK 使用仓库内固定的发布密钥签名，可覆盖安装上一版本。1.0.1 因当时密钥随机，需要卸载后重装一次。
+            签名密钥与 1.0.2 相同，可以直接覆盖安装。
           files: ${{ steps.version.outputs.asset }}
           token: ${{ secrets.GITHUB_TOKEN }}

@@ -13,6 +13,14 @@ import java.net.URL
 
 data class GithubRelease(val tag: String, val notes: String, val apkUrl: String, val assetName: String)
 
+/** Prefer the current Luna asset, and still accept the 1.0.2 M3Browser file name. */
+fun pickReleaseApk(names: List<String>): String? {
+    val apks = names.filter { it.endsWith(".apk", ignoreCase = true) }
+    return apks.firstOrNull { it.startsWith("Luna-", ignoreCase = true) }
+        ?: apks.firstOrNull { it.startsWith("M3Browser-", ignoreCase = true) }
+        ?: apks.firstOrNull()
+}
+
 class UpdateChecker(private val context: Context) {
     fun fetchLatest(): GithubRelease? {
         val conn = (URL(LATEST).openConnection() as HttpURLConnection).apply {
@@ -28,28 +36,26 @@ class UpdateChecker(private val context: Context) {
             val tag = json.optString("tag_name")
             val notes = json.optString("body")
             val assets = json.optJSONArray("assets") ?: return null
-            var url = ""
-            var name = ""
-            for (i in 0 until assets.length()) {
-                val a = assets.getJSONObject(i)
-                val n = a.optString("name")
-                if (n.endsWith(".apk", true)) {
-                    url = a.optString("browser_download_url")
-                    name = n
-                    break
+            val named = buildList {
+                for (i in 0 until assets.length()) {
+                    val a = assets.getJSONObject(i)
+                    val n = a.optString("name")
+                    if (n.endsWith(".apk", true)) add(n to a.optString("browser_download_url"))
                 }
             }
-            if (url.isBlank() || tag.isBlank()) null else GithubRelease(tag, notes, url, name)
+            val chosen = pickReleaseApk(named.map { it.first })
+            val url = named.firstOrNull { it.first == chosen }?.second.orEmpty()
+            if (url.isBlank() || tag.isBlank()) null else GithubRelease(tag, notes, url, chosen.orEmpty())
         } finally {
             conn.disconnect()
         }
     }
 
     fun enqueue(release: GithubRelease): Long {
-        val name = release.assetName.ifBlank { "M3Browser-${release.tag}.apk" }
+        val name = release.assetName.ifBlank { "Luna-${release.tag}.apk" }
         val req = DownloadManager.Request(Uri.parse(release.apkUrl)).apply {
             setTitle(name)
-            setDescription("正在下载 M3 Browser ${release.tag}")
+            setDescription("正在下载 Luna ${release.tag}")
             setMimeType("application/vnd.android.package-archive")
             setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, name)
