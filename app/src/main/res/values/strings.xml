@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">M3 Browser</string>
+    <string name="hint_search">搜索或输入网址</string>
+    <string name="new_tab">新标签页</string>
+    <string name="bookmarks">书签</string>
+    <string name="history">历史记录</string>
+    <string name="settings">设置</string>
+</resources>
